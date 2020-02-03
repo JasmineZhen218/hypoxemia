@@ -2,7 +2,7 @@
 
 This is a hypoxemia prediction projects. It use unidentified MIMIC III Data to predict hypoxemia 
 
-### Target Subjects and IDs
+### Target Subjects and records
 `target_IDs.txt` includes the IDs of target patients, 6643 in all. Target patients satisfy:
 * Patients who have minute-to-minute SPO2 records >= 5 minutes
 * Patients who are older than 16
