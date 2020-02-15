@@ -7,5 +7,6 @@
 
 To see example labels:
 1) Get access to MIMIC time-series dataset and save time-series data in dictionary format. Name: Series
-2) import label
-3) run "summary(name,series)"
+2) `import label`
+3) run `summary(name,series)`
+(See examples in labelling.ipynb)
