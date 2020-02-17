@@ -1,13 +1,13 @@
 # hypoxemia
 
-This is a hypoxemia prediction projects. It use unidentified MIMIC III Data to predict hypoxemia 
+This is a hypoxemia prediction projects. We are trying to use unidentified MIMIC III Data to predict hypoxemia 
 
 ### Target Subjects and records
-`target_IDs.txt` includes the IDs of target patients, 6643 in all. Target patients satisfy:
+`target_IDs.txt` includes the IDs of target patients, 6643 in all. Target patients are:
 * Patients who have minute-to-minute SPO2 records >= 5 minutes
 * Patients who are older than 16
 
-`meta_records.csv`includes information of usable time-series records. Usable records satisfy:
+`meta_records.csv`includes information of usable time-series records. Usable records are:
 * Records of target patients
 * Records whose SPO2 channel>= 5 minutes
 
