@@ -1,6 +1,10 @@
 import numpy as np
 import json
 import matplotlib.pyplot as plt
+import math
+
+from scipy import signal
+from scipy.fftpack import fft
 
 
 def ewma_vectorized_safe(data, alpha, row_size=None, dtype=None, order='C', out=None):
@@ -269,82 +273,52 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C
     return out
 
 
-# def savitzky_golay(y, window_size, order, deriv=0, rate=1):
-#     """
-#     Modified from: https://scipy-cookbook.readthedocs.io/items/SavitzkyGolay.html
-#     Smooth (and optionally differentiate) data with a Savitzky-Golay filter.
-#     The Savitzky-Golay filter removes high frequency noise from data.
-#     It has the advantage of preserving the original shape and
-#     features of the signal better than other types of filtering
-#     approaches, such as moving averages techniques.
-#     Parameters
-#     ----------
-#     y : array_like, shape (N,)
-#         the values of the time history of the signal.
-#     window_size : int
-#         the length of the window. Must be an odd integer number.
-#     order : int
-#         the order of the polynomial used in the filtering.
-#         Must be less then `window_size` - 1.
-#     deriv: int
-#         the order of the derivative to compute (default = 0 means only smoothing)
-#     Returns
-#     -------
-#     ys : ndarray, shape (N)
-#         the smoothed signal (or it's n-th derivative).
-#     Notes
-#     -----
-#     The Savitzky-Golay is a type of low-pass filter, particularly
-#     suited for smoothing noisy data. The main idea behind this
-#     approach is to make for each point a least-square fit with a
-#     polynomial of high order over a odd-sized window centered at
-#     the point.
-#     Examples
-#     --------
-#     t = np.linspace(-4, 4, 500)
-#     y = np.exp( -t**2 ) + np.random.normal(0, 0.05, t.shape)
-#     ysg = savitzky_golay(y, window_size=31, order=4)
-#     import matplotlib.pyplot as plt
-#     plt.plot(t, y, label='Noisy signal')
-#     plt.plot(t, np.exp(-t**2), 'k', lw=1.5, label='Original signal')
-#     plt.plot(t, ysg, 'r', label='Filtered signal')
-#     plt.legend()
-#     plt.show()
-#     References
-#     ----------
-#     .. [1] A. Savitzky, M. J. E. Golay, Smoothing and Differentiation of
-#        Data by Simplified Least Squares Procedures. Analytical
-#        Chemistry, 1964, 36 (8), pp 1627-1639.
-#     .. [2] Numerical Recipes 3rd Edition: The Art of Scientific Computing
-#        W.H. Press, S.A. Teukolsky, W.T. Vetterling, B.P. Flannery
-#        Cambridge University Press ISBN-13: 9780521880688
-#     """
-#     import numpy as np
-#     from math import factorial
-#
-#     try:
-#         window_size = np.abs(np.int(window_size))
-#         order = np.abs(np.int(order))
-#     except ValueError:
-#         raise ValueError("window_size and order have to be of type int")
-#     if window_size % 2 != 1 or window_size < 1:
-#         raise TypeError("window_size size must be a positive odd number")
-#     if window_size < order + 2:
-#         raise TypeError("window_size is too small for the polynomials order")
-#     order_range = range(order+1)
-#     half_window = (window_size -1) // 2
-#     # precompute coefficients
-#     b = np.mat([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
-#     m = np.linalg.pinv(b).A[deriv] * rate**deriv * factorial(deriv)
-#     # pad the signal at the extremes with
-#     # values taken from the signal itself
-#     firstvals = [y[0] for _ in range(half_window)]
-#     lastvals = [y[-1] for _ in range(half_window)]
-#     y = np.concatenate([firstvals, y, lastvals])
-#     return np.convolve( m[::-1], y, mode='valid')
+def moving_average(data, n):
+    """Compute the causal moving average of 1D data.
+
+    At the beginning of the data, where there is not enough previous data to do the calculation, the output is padded
+    with nans.
+
+    :param data: The data.
+    :param n: The window size of the moving average.
+    :return: The moving average, padded with nans in the front.
+    """
+    return np.concatenate([np.ones(n - 1) * np.nan, np.convolve(data, np.ones(n), mode='valid') / n])
+
+
+def ema_and_emvar(data, alpha):
+    """Compute the exponentially weighted moving average and variance.
+
+    This function handles nans in the input by carrying forward the mean and variance of the last non-nan data point as
+    the most recent mean and variance. We might instead want to start over when a nan occurs - this is something to ask
+    the engineering PIs about.
+    TODO: Ask PIs about above.
+    TODO: Make more efficient (vectorized).
+
+    :param data: The data.
+    :param alpha: The parameter for exponential weighting.
+    :return: ema, the exponentially weighted moving average, and emvar, the exponentially weighted moving variance.
+    """
+    ema = np.zeros_like(data)
+    emvar = np.zeros_like(data)
+    ema[0] = data[0]
+    last_valid_ema = ema[0]
+    last_valid_emvar = emvar[0]
+    for i, cur in enumerate(data[1:]):
+        if math.isnan(cur):
+            ema[i] = np.nan
+            emvar[i] = np.nan
+        else:
+            delta = cur - last_valid_ema
+            ema[i] = last_valid_ema + alpha * delta
+            emvar[i] = (1 - alpha) * (last_valid_emvar + alpha * delta ** 2)
+            last_valid_ema = ema[i]
+            last_valid_emvar = emvar[i]
+    return ema, emvar
 
 
 def triangle(n):
+    """Compute the nth triangle number; helper function for linear_lstsq."""
     sum = 0
     for i in range(n + 1):
         sum += i
@@ -352,6 +326,7 @@ def triangle(n):
 
 
 def triangles(n):
+    """Compute the first n triangle numbers; helper function for tetrahedron."""
     triangles = np.zeros(n + 1)
     for i in range(n + 1):
         for j in range(i, n + 1):
@@ -360,6 +335,7 @@ def triangles(n):
 
 
 def tetrahedron(n):
+    """Compute the nth tetrahedral number; helper function for linear_lstsq_deriv."""
     sum = 0
     tris = triangles(n)
     for tri in tris:
@@ -368,6 +344,16 @@ def tetrahedron(n):
 
 
 def linear_lstsq(data, n):
+    """Causally filter data using linear least-squares approximation.
+
+    At the beginning of the data, where there is not enough previous data to do the calculation, the output is padded
+    with nans. These weights are based on matching a pattern from a website.
+    TODO: Prove that the weights are always correct.
+
+    :param data: The data.
+    :param n: The window of the linear least-squares filter.
+    :return: The linear least-squares filtered data, padded at the beginning by nans.
+    """
     tri = triangle(n)
     newest_weight = (2 * n - 1) / tri
     oldest_weight = - (n - 2) / tri
@@ -377,6 +363,16 @@ def linear_lstsq(data, n):
 
 
 def linear_lstsq_deriv(data, n):
+    """Causally approximate the derivative data using linear least-squares.
+
+    At the beginning of the data, where there is not enough previous data to do the calculation, the output is padded
+    with nans. These weights are based on matching a pattern from a website.
+    TODO: Prove that the weights are always correct.
+
+    :param data: The data.
+    :param n: The window of the linear least-squares filter.
+    :return: The approximate derivative of the data, padded at the beginning by nans.
+    """
     tetra = tetrahedron(n - 1)
     edge_weight = (n - 1) / tetra
     increment = (2 * edge_weight) / (n - 1)
@@ -384,72 +380,82 @@ def linear_lstsq_deriv(data, n):
     return np.concatenate([np.ones(min(n - 1, len(data))) * np.nan, np.correlate(data, weights, mode='valid')])
 
 
+# def spectral_entropy(data, n):
+#     f, t, Zxx = signal.stft(data, window='blackmanharris', nfft=n, detrend='linear')
+#     power_spectrum = np.square(freq)
+#     normed_ps = power_spectrum / np.sum(power_spectrum)
+#     entropy = -np.sum(np.multiply(normed_ps, np.log2(normed_ps)) / np.log2(n))
+#     return entropy
+
+
 def extract_features(raw_name):
-    # save_path = raw_name + '_Features/'
-    save_path = 'Demo/'
+    """Extract additional features for a particular feature.
+
+    Assumes that the current folder has a subfolder names "Raw" with the data in it and one called "Features" to which
+    the features will be saved.
+
+    :param raw_name: The name of the original feature.
+    """
+    save_path = raw_name + '_Features/'
+    # save_path = 'Demo/'
     num_records = 0
     all_data = dict()
     with open('Raw/' + raw_name + '.json', 'r') as json_file:
         data = json.load(json_file)
         print('Finished Reading')
         num_entries = len(data)
-        for name, raw_spo2 in data.items():
+        for name, raw_data in data.items():
             if num_records % 500 == 0:
                 print('{} of {}'.format(num_records, num_entries))
             num_records += 1
             try:
-                mean_5 = np.concatenate([np.ones(4) * np.nan, np.convolve(raw_spo2, np.ones(5), mode='valid') / 5])
-                mean_20 = np.concatenate([np.ones(19) * np.nan, np.convolve(raw_spo2, np.ones(20), mode='valid') / 20])
-                mean_60 = np.concatenate([np.ones(59) * np.nan, np.convolve(raw_spo2, np.ones(60), mode='valid') / 60])
-                ewma_0_2 = ewma_vectorized_safe(raw_spo2, 0.2)
-                ewma_0_1 = ewma_vectorized_safe(raw_spo2, 0.1)
-                ewma_0_05 = ewma_vectorized_safe(raw_spo2, 0.05)
-                ewma_0_01 = ewma_vectorized_safe(raw_spo2, 0.01)
-                lin_lstsq_5 = linear_lstsq(raw_spo2, 5)
-                lin_lstsq_20 = linear_lstsq(raw_spo2, 20)
-                lin_lstsq_60 = linear_lstsq(raw_spo2, 60)
-                lin_lstsq_deriv_5 = linear_lstsq_deriv(raw_spo2, 5)
-                lin_lstsq_deriv_20 = linear_lstsq_deriv(raw_spo2, 20)
-                lin_lstsq_deriv_60 = linear_lstsq_deriv(raw_spo2, 60)
-                # sg_5_3 = savitzky_golay(raw_spo2, window_size=5, order=3, deriv=0)
-                # sg_11_7 = savitzky_golay(raw_spo2, window_size=11, order=7, deriv=0)
-                # sg_31_15 = savitzky_golay(raw_spo2, window_size=31, order=15, deriv=0)
-                # sg_deriv_5_3 = savitzky_golay(raw_spo2, window_size=5, order=3, deriv=1)
-                # sg_deriv_11_7 = savitzky_golay(raw_spo2, window_size=11, order=7, deriv=1)
-                # sg_deriv_31_15 = savitzky_golay(raw_spo2, window_size=31, order=15, deriv=1)
-                # sg_deriv2_5_3 = savitzky_golay(raw_spo2, window_size=5, order=3, deriv=2)
-                # sg_deriv2_11_7 = savitzky_golay(raw_spo2, window_size=11, order=7, deriv=2)
-                # sg_deriv2_31_15 = savitzky_golay(raw_spo2, window_size=31, order=15, deriv=2)
+                mean_5 = moving_average(raw_data, 5)
+                mean_20 = moving_average(raw_data, 20)
+                mean_60 = moving_average(raw_data, 60)
+                # ewma_0_2 = ewma_vectorized_safe(raw_data, 0.2)
+                # ewma_0_1 = ewma_vectorized_safe(raw_data, 0.1)
+                # ewma_0_05 = ewma_vectorized_safe(raw_data, 0.05)
+                # ewma_0_01 = ewma_vectorized_safe(raw_data, 0.01)
+                ewma_0_2, ewmvar_0_2 = ema_and_emvar(raw_data, 0.2)
+                ewma_0_1, ewmvar_0_1 = ema_and_emvar(raw_data, 0.1)
+                ewma_0_05, ewmvar_0_05 = ema_and_emvar(raw_data, 0.05)
+                ewma_0_01, ewmvar_0_01 = ema_and_emvar(raw_data, 0.01)
+                lin_lstsq_5 = linear_lstsq(raw_data, 5)
+                lin_lstsq_20 = linear_lstsq(raw_data, 20)
+                lin_lstsq_60 = linear_lstsq(raw_data, 60)
+                lin_lstsq_deriv_5 = linear_lstsq_deriv(raw_data, 5)
+                lin_lstsq_deriv_20 = linear_lstsq_deriv(raw_data, 20)
+                lin_lstsq_deriv_60 = linear_lstsq_deriv(raw_data, 60)
+                spec_ent_20 = spectral_entropy(raw_data, 20)
+                spec_ent_60 = spectral_entropy(raw_data, 60)
             except:
                 continue
+            dtype = np.float32
             data_2 = {
-                'mean_5': mean_5.astype(np.float32).tolist(),
-                'mean_20': mean_20.astype(np.float32).tolist(),
-                'mean_60': mean_60.astype(np.float32).tolist(),
-                'ewma_0_2': ewma_0_2.astype(np.float32).tolist(),
-                'ewma_0_1': ewma_0_1.astype(np.float32).tolist(),
-                'ewma_0_05': ewma_0_05.astype(np.float32).tolist(),
-                'ewma_0_01': ewma_0_01.astype(np.float32).tolist(),
-                'lin_lstsq_5': lin_lstsq_5.astype(np.float32).tolist(),
-                'lin_lstsq_20': lin_lstsq_20.astype(np.float32).tolist(),
-                'lin_lstsq_60': lin_lstsq_60.astype(np.float32).tolist(),
-                'lin_lstsq_deriv_5': lin_lstsq_deriv_5.astype(np.float32).tolist(),
-                'lin_lstsq_deriv_20': lin_lstsq_deriv_20.astype(np.float32).tolist(),
-                'lin_lstsq_deriv_60': lin_lstsq_deriv_60.astype(np.float32).tolist(),
-                # 'sg_5_3': sg_5_3.astype(np.float32).tolist(),
-                # 'sg_11_7': sg_11_7.astype(np.float32).tolist(),
-                # 'sg_31_15': sg_31_15.astype(np.float32).tolist(),
-                # 'sg_deriv_5_3': sg_deriv_5_3.astype(np.float32).tolist(),
-                # 'sg_deriv_11_7': sg_deriv_11_7.astype(np.float32).tolist(),
-                # 'sg_deriv_31_15': sg_deriv_31_15.astype(np.float32).tolist(),
-                # 'sg_deriv2_5_3': sg_deriv2_5_3.astype(np.float32).tolist(),
-                # 'sg_deriv2_11_7': sg_deriv2_11_7.astype(np.float32).tolist(),
-                # 'sg_deriv2_31_15': sg_deriv2_31_15.astype(np.float32).tolist(),
+                'mean_5': mean_5.astype(dtype).tolist(),
+                'mean_20': mean_20.astype(dtype).tolist(),
+                'mean_60': mean_60.astype(dtype).tolist(),
+                'ewma_0_2': ewma_0_2.astype(dtype).tolist(),
+                'ewma_0_1': ewma_0_1.astype(dtype).tolist(),
+                'ewma_0_05': ewma_0_05.astype(dtype).tolist(),
+                'ewma_0_01': ewma_0_01.astype(dtype).tolist(),
+                'ewmvar_0_2': ewmvar_0_2.astype(dtype).tolist(),
+                'ewmvar_0_1': ewmvar_0_1.astype(dtype).tolist(),
+                'ewmvar_0_05': ewmvar_0_05.astype(dtype).tolist(),
+                'ewmvar_0_01': ewmvar_0_01.astype(dtype).tolist(),
+                'lin_lstsq_5': lin_lstsq_5.astype(dtype).tolist(),
+                'lin_lstsq_20': lin_lstsq_20.astype(dtype).tolist(),
+                'lin_lstsq_60': lin_lstsq_60.astype(dtype).tolist(),
+                'lin_lstsq_deriv_5': lin_lstsq_deriv_5.astype(dtype).tolist(),
+                'lin_lstsq_deriv_20': lin_lstsq_deriv_20.astype(dtype).tolist(),
+                'lin_lstsq_deriv_60': lin_lstsq_deriv_60.astype(dtype).tolist(),
+                'spec_ent_20': spec_ent_20.astype(dtype).tolist(),
+                'spec_ent_60': spec_ent_60.astype(dtype).tolist(),
             }
             all_data[name] = data_2
-            if name == 'p000052-2191-01-10-02-21n':
-                with open(save_path + name + '.json', 'w') as savefile:
-                    json.dump(data_2, savefile)
+            # if name == 'p000052-2191-01-10-02-21n':
+            #     with open(save_path + name + '.json', 'w') as savefile:
+            #         json.dump(data_2, savefile)
             # with open(save_path + name + '.json', 'w') as savefile:
             #     json.dump(data_2, savefile)
     with open('Features/' + raw_name + '_Features.json', 'w') as savefile:
@@ -480,5 +486,5 @@ def check_features():
 
 
 if __name__ == '__main__':
-    # extract_features('SpO2')
-    check_features()
+    extract_features('SpO2')
+    # check_features()
