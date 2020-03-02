@@ -11,8 +11,8 @@
 
 ### Label exclusion criteria
 
-* Exclude time point when **hypoxemia event** happens
-* 
+* Exclude time point when **hypoxemia event** happens----> Only hypoxemia-free interval left
+* Exclude hypoxemia-free interval shorter than 30 minutes
 
 To see example labels:
 1) Get access to MIMIC time-series dataset and save time-series data in dictionary format. Name: Series
