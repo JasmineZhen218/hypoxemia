@@ -269,5 +269,36 @@ def test_features():
         plt.show()
 
 
+def test_pos():
+    np.random.seed(0)
+    signal = np.random.rand(500)
+
+    llsq_1 = linear_lstsq(signal, 15)
+    llsq_2 = np.asarray([linear_lstsq(signal, 15, i) for i in range(500)])
+    np.testing.assert_array_equal(llsq_1, llsq_2)
+
+    llsqd_1 = linear_lstsq_deriv(signal, 15)
+    llsqd_2 = np.asarray([linear_lstsq_deriv(signal, 15, i) for i in range(500)])
+    np.testing.assert_array_equal(llsqd_1, llsqd_2)
+
+    ewma_1, ewmvar_1 = finite_approx_ewma_and_ewmvar(signal, 15)
+    ew_2 = np.asarray([finite_approx_ewma_and_ewmvar(signal, 15, i) for i in range(500)])
+    ewma_2 = ew_2[:, 0]
+    ewmvar_2 = ew_2[:, 1]
+    np.testing.assert_array_equal(ewma_1, ewma_2)
+    np.testing.assert_array_equal(ewmvar_1, ewmvar_2)
+
+    spe_1 = spectral_entropy(signal, 15)
+    spe_2 = np.asarray([spectral_entropy(signal, 15, i) for i in range(500)])
+    np.testing.assert_array_equal(spe_1, spe_2)
+
+    spe_det_1 = spectral_entropy_detrend(signal, linear_lstsq(signal, 15), 15)
+    spe_det_2 = np.asarray([spectral_entropy(signal, 15, i, True) for i in range(500)])
+    np.testing.assert_array_equal(spe_det_1, spe_det_2)
+
+    print('All tests passed')
+
+
 if __name__ == '__main__':
-    test_features()
+    # test_features()
+    test_pos()

@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from scipy import signal
 
 
-def linear_lstsq(data, n):
+def linear_lstsq(data, n, pos=None):
     """Causally filter data using linear least-squares approximation.
 
     At the beginning of the data, where there is not enough previous data to do the calculation, the output is padded
@@ -25,13 +25,19 @@ def linear_lstsq(data, n):
 
     :param data: The data.
     :param n: The window of the linear least-squares filter.
+    :param pos: The position in the data at which to extract the feature. If None, extracts feature for whole sequence.
     :return: The linear least-squares filtered data, padded at the beginning by nans.
     """
     weights = np.asarray([(6 * k + 4 * n - 2) / (n * (n + 1)) for k in range(- n + 1, 1)])
-    return np.concatenate([np.ones(min(n - 1, len(data))) * np.nan, np.correlate(data, weights, mode='valid')])
+    if pos is None:
+        return np.concatenate([np.ones(min(n - 1, len(data))) * np.nan, np.correlate(data, weights, mode='valid')])
+    else:
+        if pos < n - 1:
+            return np.nan
+        return np.dot(weights, data[(pos - n + 1):(pos + 1)])
 
 
-def linear_lstsq_deriv(data, n):
+def linear_lstsq_deriv(data, n, pos=None):
     """Causally approximate the derivative data using linear least-squares.
 
     At the beginning of the data, where there is not enough previous data to do the calculation, the output is padded
@@ -39,17 +45,24 @@ def linear_lstsq_deriv(data, n):
 
     :param data: The data.
     :param n: The window of the linear least-squares filter.
+    :param pos: The position in the data at which to extract the feature. If None, extracts feature for whole sequence.
     :return: The approximate derivative of the data, padded at the beginning by nans.
     """
     weights = np.asarray([(12 * k + 6 * n - 6) / ((n - 1) * n * (n + 1)) for k in range(- n + 1, 1)])
-    return np.concatenate([np.ones(min(n - 1, len(data))) * np.nan, np.correlate(data, weights, mode='valid')])
+    if pos is None:
+        return np.concatenate([np.ones(min(n - 1, len(data))) * np.nan, np.correlate(data, weights, mode='valid')])
+    else:
+        if pos < n - 1:
+            return np.nan
+        return np.dot(weights, data[(pos - n + 1):(pos + 1)])
 
 
-def finite_approx_ewma_and_ewmvar(data, n):
+def finite_approx_ewma_and_ewmvar(data, n, pos=None):
     """Approximates the exponentially weighted moving average and variance using a window of finite length.
 
     :param data: The data to extract the features from.
     :param n: The window size
+    :param pos: The position in the data at which to extract the feature. If None, extracts feature for whole sequence.
     :return: ewma, the approximate exponentially weighted moving average, and ewmvar, the approximate exponentially
         weighted moving variance.
     """
@@ -58,37 +71,78 @@ def finite_approx_ewma_and_ewmvar(data, n):
     for i in range(n):
         weights[n - i - 1] *= (1 - alpha) ** i
     weights = weights / np.sum(weights)
-    ewma = np.concatenate([np.ones(n - 1) * np.nan, np.correlate(data, weights, mode='valid')])
-    ewmvar = np.concatenate([np.ones(n - 1) * np.nan, np.correlate(np.square(data - ewma), weights, mode='valid')])
-    return ewma, ewmvar
+    if pos is None:
+        ewma = np.concatenate([np.ones(n - 1) * np.nan, np.correlate(data, weights, mode='valid')])
+        ewmvar = np.concatenate([np.ones(n - 1) * np.nan, np.correlate(np.square(data - ewma), weights, mode='valid')])
+        return ewma, ewmvar
+    else:
+        if pos < n - 1:
+            return np.nan, np.nan
+        elif pos < 2 * n - 2:
+            return np.dot(weights, data[(pos - n + 1):(pos + 1)]), np.nan
+        else:
+            ewma = np.correlate(data[(pos - 2 * n + 2):(pos + 1)], weights, mode='valid')
+            return ewma[-1], np.dot(weights, np.square(data[(pos - n + 1):(pos + 1)] - ewma))
 
 
-def spectral_entropy(data, n):
+def spectral_entropy(data, n, pos=None, detrend=False):
     """Computes the windowed real-time spectral entropy of the data.
 
-    Note: This function does NOT detrend. Any detrending/debiasing must be done ahead of time.
+    Note: This function does NOT debias.
     TODO: Ensure that this works properly.
 
     :param data: The data to extract the entropy from.
     :param n: The size of the window.
+    :param pos: The position in the data at which to extract the feature. If None, extracts feature for whole sequence.
+    :param detrend: Whether or not to detrend the data.
     :return: The spectral entropy.
     """
-    num_nans = np.argwhere(~np.isnan(data))[0][0]
-    f, t, Zxx = signal.stft(data[num_nans:],
-                            window='blackmanharris',
-                            nperseg=n,
-                            noverlap=n - 1,
-                            detrend=False,
-                            boundary=None)
-    power_spectra = np.square(np.absolute(Zxx))
-    epsilon = 1e-30
-    normed_ps = power_spectra / (np.sum(power_spectra, axis=0) + epsilon)
-    return np.concatenate([np.ones(n - 1 + num_nans) * np.nan,
-                           -np.sum(np.multiply(normed_ps, np.log2(normed_ps + epsilon)), axis=0) / np.log2(n)])
+    if pos is None:
+        nan_position = np.argwhere(~np.isnan(data))
+        if len(nan_position) == 0:
+            return np.nan * np.ones_like(data)
+        num_nans = nan_position[0][0]
+        try:
+            f, t, Zxx = signal.stft(data[num_nans:],
+                                    window='blackmanharris',
+                                    nperseg=n,
+                                    noverlap=n - 1,
+                                    detrend=False,
+                                    boundary=None)
+        except:
+            print("An error has occurred in spectral entropy calculation.")
+            return np.ones_like(data) * np.nan
+        power_spectra = np.square(np.absolute(Zxx))
+        epsilon = 1e-30
+        normed_ps = power_spectra / (np.sum(power_spectra, axis=0) + epsilon)
+        return np.concatenate([np.ones(n - 1 + num_nans) * np.nan,
+                               -np.sum(np.multiply(normed_ps, np.log2(normed_ps + epsilon)), axis=0) / np.log2(n)])
+    else:
+        if pos < n - 1:
+            return np.nan
+        window_data = np.copy(data[(pos - n + 1):(pos + 1)])
+        if detrend:
+            if pos < 2 * n - 2:
+                return np.nan
+            trend = linear_lstsq(data[(pos - 2 * n + 2):(pos + 1)], n)
+            window_data -= trend[(-n):]
+        f, t, Zxx = signal.stft(window_data,
+                                window='blackmanharris',
+                                nperseg=n,
+                                noverlap=n - 1,
+                                detrend=False,
+                                boundary=None)
+        power_spectra = np.square(np.absolute(Zxx))
+        epsilon = 1e-30
+        normed_ps = power_spectra / (np.sum(power_spectra, axis=0) + epsilon)
+        return (-np.sum(np.multiply(normed_ps, np.log2(normed_ps + epsilon)), axis=0) / np.log2(n))[0]
 
 
 def spectral_entropy_detrend(data, filtered, n):
-    return spectral_entropy(data - filtered, n)
+    try:
+        return spectral_entropy(data - filtered, n)
+    except:
+        return np.ones_like(data) * np.nan
 
 
 def moving_average(data, n):
