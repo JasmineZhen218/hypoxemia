@@ -1,4 +1,4 @@
-#this program extract feature data into json file
+#this program extract time-series data of different channels into json file
 import numpy as np
 import wfdb
 from itertools import chain
