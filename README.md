@@ -1,6 +1,6 @@
 # Hypoxemia prediction
 
-This is a computational physiology project which aims at predicting near-feature hypoxemia for patients in the ICU
+This is a computational physiology project which aims at predicting near-future hypoxemia for patients in the ICU
 
 ### Introduction
 
